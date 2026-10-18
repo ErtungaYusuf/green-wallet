@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "green-wallet"
+version = "0.1.0"
+description = "A wallet for Green (GRN): a page in the browser that holds your keys and sends coins"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["green-grn>=0.21"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+green-wallet = "green_wallet.wallet:main"
+
+[tool.setuptools]
+packages = ["green_wallet"]
+
+[tool.setuptools.package-data]
+green_wallet = ["wallet.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

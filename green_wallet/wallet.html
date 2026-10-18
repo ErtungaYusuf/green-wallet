@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Green Wallet</title>
+<style>
+:root { --bg:#f6f7f4; --panel:#fff; --ink:#1d2420; --muted:#66706a; --line:#e2e5df; --accent:#1f8a4c; --accent-ink:#fff;
+        --soft:#e8f3ec; --bad:#b42318; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111513; --panel:#181d1a; --ink:#e6ebe7; --muted:#94a09a; --line:#2a312d;
+        --accent:#3fbf74; --accent-ink:#0c140f; --soft:#1d2a22; --bad:#f06a5f; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+main { max-width:720px; margin:0 auto; padding:24px 16px 48px; display:grid; gap:16px; }
+h1 { margin:0; font-size:20px; } h1 span { color:var(--accent); }
+.sub { color:var(--muted); font-size:13px; }
+.panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+.panel h2 { margin:0 0 10px; font-size:15px; }
+.balance { font-size:34px; font-variant-numeric:tabular-nums; letter-spacing:-.5px; }
+.addr { font-family:var(--mono); font-size:13px; word-break:break-all; background:var(--bg); border:1px solid var(--line);
+        border-radius:8px; padding:8px 10px; }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+input, textarea { font:inherit; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+input { flex:1; min-width:140px; } textarea { width:100%; min-height:80px; font-family:var(--mono); font-size:13px; }
+button { font:inherit; border:1px solid var(--accent); background:var(--accent); color:var(--accent-ink); border-radius:8px; padding:8px 14px; cursor:pointer; }
+button.ghost { background:transparent; color:var(--accent); }
+button:disabled { opacity:.55; }
+.msg { font-size:13px; min-height:1.4em; } .msg.bad { color:var(--bad); }
+.phrase { font-family:var(--mono); background:var(--soft); border:1px solid var(--accent); border-radius:8px; padding:12px;
+          display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:4px 12px; }
+table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+td, th { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); font-size:13px; }
+th { color:var(--muted); font-weight:550; }
+.in { color:var(--accent); } [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header><h1><span>Green</span> Wallet</h1><div class="sub" id="where"></div></header>
+
+  <section class="panel" id="setup" hidden>
+    <h2>No wallet in this folder yet</h2>
+    <div class="row"><input id="newpw" type="password" placeholder="password (at least 8 characters)" autocomplete="new-password"></div>
+    <div class="row"><button id="create">Create a new wallet</button></div>
+    <p class="sub">Or restore one from its recovery phrase:</p>
+    <textarea id="phrase" placeholder="the 12 or 24 words, in order" autocomplete="off"></textarea>
+    <div class="row"><button class="ghost" id="restore">Restore</button></div>
+    <div class="msg" id="setupmsg"></div>
+  </section>
+
+  <section class="panel" id="newphrase" hidden>
+    <h2>Write down your recovery phrase</h2>
+    <p class="sub">On paper, in order, kept offline. With it the wallet can be restored anywhere; anyone who sees it can take your
+      coins; nobody can recover it for you. It is shown only now.</p>
+    <div class="phrase" id="words"></div>
+    <div class="row"><button id="written">I have written it down</button></div>
+  </section>
+
+  <section class="panel" id="locked" hidden>
+    <h2>Unlock</h2>
+    <div class="row"><input id="pw" type="password" placeholder="password" autocomplete="current-password"><button id="unlock">Unlock</button></div>
+    <div class="msg" id="unlockmsg"></div>
+  </section>
+
+  <section class="panel" id="overview" hidden>
+    <div class="sub">Balance</div>
+    <div class="balance" id="balance">-</div>
+    <div class="sub" id="pending"></div>
+    <h2 style="margin-top:14px">Receive</h2>
+    <div class="row"><div class="addr" id="address" style="flex:1"></div><button class="ghost" id="copy">Copy</button></div>
+  </section>
+
+  <section class="panel" id="sendpanel" hidden>
+    <h2>Send</h2>
+    <div class="row"><input id="to" placeholder="recipient address (grn1...)" autocomplete="off"></div>
+    <div class="row"><input id="amount" placeholder="amount in GRN" inputmode="decimal"><button id="send">Send</button></div>
+    <div class="sub" id="fee"></div>
+    <div class="msg" id="sendmsg"></div>
+    <div class="row"><button class="ghost" id="lock">Lock the wallet</button></div>
+  </section>
+
+  <section class="panel" id="historypanel" hidden>
+    <h2>History</h2>
+    <table><thead><tr><th>Block</th><th>What</th><th>Amount</th><th>With</th></tr></thead><tbody id="history"></tbody></table>
+  </section>
+</main>
+<script>
+"use strict";
+const TOKEN = "{{TOKEN}}";
+const $ = (id) => document.getElementById(id);
+let state = null, showingPhrase = false;
+const grn = (y) => (y / 1e8).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 8 }) + " GRN";
+const el = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-UI-Token": TOKEN }, body: JSON.stringify(body) });
+  const d = await r.json().catch(() => ({ error: "bad answer" }));
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+}
+function say(id, text, bad) { $(id).textContent = text; $(id).className = "msg" + (bad ? " bad" : ""); }
+
+function render() {
+  const s = state; if (!s) return;
+  $("where").textContent = `${s.folder} · node ${s.node}` + (s.exists && !s.online ? " · node offline" : s.online ? ` · block ${s.height}` : "");
+  $("setup").hidden = s.exists || showingPhrase;
+  $("locked").hidden = !s.exists || s.unlocked || showingPhrase;
+  for (const id of ["overview", "historypanel"]) $(id).hidden = !s.exists || showingPhrase;
+  $("sendpanel").hidden = !s.unlocked || showingPhrase;
+  if (!s.exists) return;
+  $("address").textContent = s.address;
+  $("balance").textContent = s.online ? grn(s.balance) : "?";
+  $("pending").textContent = s.online && s.pending !== s.balance ? `${grn(s.pending)} once pending transactions confirm` : "";
+  $("fee").textContent = s.online ? `Fee about ${grn(s.transfer_fee)} (to be in the next blocks)` : "";
+  const tb = $("history"); tb.replaceChildren();
+  for (const r of s.history || []) {
+    const tr = el("tr");
+    const what = r.type === "reward" ? "mining reward" : r.type === "transfer" ? (r.role === "sender" ? "sent" : "received") : r.type;
+    const amt = r.amount !== undefined ? (r.role === "sender" ? "-" : "+") + grn(r.amount) : "";
+    tr.append(el("td", r.height === null ? "pending" : String(r.height)), el("td", what),
+              el("td", amt, r.role === "sender" ? "" : "in"), el("td", r.other ? r.other.slice(0, 16) + "..." : ""));
+    tb.append(tr);
+  }
+  if (!(s.history || []).length) { const tr = el("tr"); const td = el("td", "Nothing yet."); td.colSpan = 4; tr.append(td); tb.append(tr); }
+}
+async function refresh() { try { state = await (await fetch("/api/state")).json(); render(); } catch (e) { $("where").textContent = "the wallet program does not answer"; } }
+
+$("create").onclick = async () => {
+  try { const r = await post("/api/create", { password: $("newpw").value }); $("newpw").value = "";
+        showingPhrase = true; $("words").replaceChildren(...r.phrase.split(" ").map((w, i) => el("div", `${i + 1}. ${w}`)));
+        $("newphrase").hidden = false; await refresh(); }
+  catch (e) { say("setupmsg", e.message, true); }
+};
+$("written").onclick = () => { showingPhrase = false; $("words").replaceChildren(); $("newphrase").hidden = true; refresh(); };
+$("restore").onclick = async () => {
+  try { await post("/api/restore", { phrase: $("phrase").value, password: $("newpw").value }); $("phrase").value = ""; $("newpw").value = ""; await refresh(); }
+  catch (e) { say("setupmsg", e.message, true); }
+};
+$("unlock").onclick = async () => {
+  try { await post("/api/unlock", { password: $("pw").value }); $("pw").value = ""; say("unlockmsg", ""); await refresh(); }
+  catch (e) { say("unlockmsg", e.message, true); }
+};
+$("pw").onkeydown = (e) => { if (e.key === "Enter") $("unlock").click(); };
+$("lock").onclick = async () => { await post("/api/lock", {}); await refresh(); };
+$("copy").onclick = async () => { try { await navigator.clipboard.writeText(state.address); $("copy").textContent = "Copied"; setTimeout(() => $("copy").textContent = "Copy", 1500); } catch (e) {} };
+$("send").onclick = async () => {
+  const btn = $("send"); btn.disabled = true;
+  try { const r = await post("/api/send", { to: $("to").value, amount: $("amount").value });
+        say("sendmsg", `Sent: transaction ${r.txid.slice(0, 16)}... (fee ${grn(r.fee)}), in the next block`); $("amount").value = ""; await refresh(); }
+  catch (e) { say("sendmsg", e.message, true); }
+  finally { btn.disabled = false; }
+};
+refresh(); setInterval(refresh, 4000);
+</script>
+</body>
+</html>
